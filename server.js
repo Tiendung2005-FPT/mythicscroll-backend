@@ -190,7 +190,7 @@ app.get('/api/manga', async (req, res) => {
         }
 
         const toObjectId = (id) => {
-            try { return new mongoose.Types.ObjectId(id); } catch(e) { return null; }
+            try { return new mongoose.Types.ObjectId(id); } catch (e) { return null; }
         };
 
         const includedObjectIds = includedGenres.map(toObjectId).filter(id => id);
@@ -270,7 +270,7 @@ app.get('/api/manga/:mangaId', async (req, res) => {
     }
 })
 
-const JWT_SECRET = process.env.JWT_SECRET || 'mythicscroll_super_secret';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 app.post('/api/auth/register', async (req, res) => {
     try {
@@ -278,7 +278,7 @@ app.post('/api/auth/register', async (req, res) => {
         if (!username || !email || !password) {
             return res.status(400).json({ error: "Please provide username, email and password" });
         }
-        
+
         const existingUser = await User.findOne({ $or: [{ email }, { username }] });
         if (existingUser) {
             return res.status(400).json({ error: "User already exists with that email or username" });
