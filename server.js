@@ -10,13 +10,14 @@ const MONGO_URI = process.env.MONGO_URI;
 app.use(express.json());
 app.use(cors());
 
-mongoose.connect(MONGO_URI)
-    .then(() => {
-        console.log('Successfully connected to MongoDB Atlas');
-    })
-    .catch((error) => {
-        console.error('Error connecting to MongoDB Atlas:', error.message);
-    });
+mongoose.connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+}).then(() => {
+    console.log("Connected to MongoDB");
+}).catch((err) => {
+    console.log("Error connecting to MongoDB:", err);
+});
 
 const ChapterSchema = mongoose.Schema({
     mangaId: {
@@ -169,7 +170,19 @@ const authMiddleware = (req, res, next) => {
         req.user = decoded;
         next();
     } catch (err) {
-        res.status(401).json({ error: "Token is not valid" });
+        res.status(401).json({ error: "Invalid token" });
+    }
+};
+
+const adminMiddleware = async (req, res, next) => {
+    try {
+        const user = await User.findById(req.user.userId).populate('role');
+        if (!user || !user.role || user.role.title !== 'Admin') {
+            return res.status(403).json({ error: "Access denied. Admin role required." });
+        }
+        next();
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 };
 
@@ -537,11 +550,18 @@ app.post('/api/auth/register', async (req, res) => {
         });
 
         await newUser.save();
+        const user = await User.findById(newUser._id).populate('role');
 
-        const payload = { userId: newUser._id };
-        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
-
-        res.status(201).json({ token, user: { id: newUser._id, username: newUser.username, email: newUser.email } });
+        const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
+        res.status(201).json({
+            token,
+            user: {
+                id: user._id,
+                username: user.username,
+                email: user.email,
+                role: user.role
+            }
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -564,10 +584,18 @@ app.post('/api/auth/login', async (req, res) => {
             return res.status(400).json({ error: "Invalid credentials" });
         }
 
-        const payload = { userId: user._id };
-        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+        const populatedUser = await User.findById(user._id).populate('role');
 
-        res.status(200).json({ token, user: { id: user._id, username: user.username, email: user.email } });
+        const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
+        res.status(200).json({
+            token,
+            user: {
+                id: user._id,
+                username: user.username,
+                email: user.email,
+                role: populatedUser.role
+            }
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -630,6 +658,47 @@ app.get('/api/chapters/single/:chapterId/available', async (req, res) => {
         if (!chapter) {
             return res.status(404).json({ error: "Chapter not found or hidden" });
         }
+        res.status(200).json(chapter);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Admin Management Routes
+app.post('/api/manga', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const manga = new Manga(req.body);
+        await manga.save();
+        res.status(201).json(manga);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.put('/api/manga/:mangaId', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const manga = await Manga.findByIdAndUpdate(req.params.mangaId, req.body, { new: true });
+        if (!manga) return res.status(404).json({ error: "Manga not found" });
+        res.status(200).json(manga);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/chapters', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const chapter = new Chapter(req.body);
+        await chapter.save();
+        res.status(201).json(chapter);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.put('/api/chapters/:chapterId', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const chapter = await Chapter.findByIdAndUpdate(req.params.chapterId, req.body, { new: true });
+        if (!chapter) return res.status(404).json({ error: "Chapter not found" });
         res.status(200).json(chapter);
     } catch (err) {
         res.status(500).json({ error: err.message });
