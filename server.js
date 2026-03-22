@@ -159,10 +159,81 @@ app.get('/', async (req, res) => {
 });
 
 app.get('/api/manga', async (req, res) => {
-    const manga = await Manga.find();
+    try {
+        const filter = {};
+        const sortBy = {}
 
-    res.status(200).json(manga)
+        const keyword = req.query.keyword || "";
+        const status = req.query.status || "";
+        const sort = req.query.sort || "";
+
+        const genresRaw = req.query.genre;
+
+        const genres = Array.isArray(genresRaw)
+            ? genresRaw
+            : genresRaw ? [genresRaw] : [];
+
+        const includedGenres = [];
+        const excludedGenres = [];
+
+        for (const id of genres) {
+            if (id.startsWith("-")) {
+                excludedGenres.push(id.slice(1));
+            }
+            else {
+                includedGenres.push(id)
+            }
+        }
+
+        if (keyword.length > 0) {
+            filter.title = { $regex: keyword, $options: "i" }
+        }
+
+        if (includedGenres.length > 0) {
+            filter.genres = { $all: includedGenres }
+        }
+
+        if (excludedGenres.length > 0) {
+            filter.genres = {
+                ...(filter.genres || {}),
+                $nin: excludedGenres
+            }
+        }
+
+        if (status.length > 0) {
+            filter.status = { $eq: status }
+        }
+
+        if (sort.length > 0) {
+            const direction = sort.startsWith("-") ? -1 : 1;
+            const field = sort.startsWith("-") ? sort.slice(1) : sort;
+
+            sortBy[field] = direction;
+        }
+
+        const manga = await Manga.find(filter).sort(sortBy);
+        res.status(200).json(manga)
+    } catch (err) {
+        res.status(500).json({ error: err.message })
+    }
 })
+
+app.get('/api/manga/:mangaId', async (req, res) => {
+    try {
+        const mangaId = req.params.mangaId;
+        if (!mongoose.Types.ObjectId.isValid(mangaId)) {
+            return res.status(400).json({ error: `Not a valid id: ${mangaId}` })
+        }
+        const manga = await Manga.findById(mangaId);
+        if (!manga) {
+            return res.status(404).json({ error: `Manga not found with id: ${mangaId}` })
+        }
+        res.status(200).json(manga)
+    } catch (err) {
+        res.status(500).json({ error: err.message })
+    }
+})
+
 
 const PORT = process.env.PORT || 9999;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
