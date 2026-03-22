@@ -49,7 +49,7 @@ const ChapterSchema = mongoose.Schema({
         required: true
     },
     chapterNumber: {
-        type: String,
+        type: Number,
         required: true
     },
     title: {
