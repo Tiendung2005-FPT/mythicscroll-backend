@@ -5,10 +5,33 @@ const mongoose = require('mongoose')
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs')
 const cors = require("cors");
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const MONGO_URI = process.env.MONGO_URI;
+
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadsDir),
+    filename: (req, file, cb) => {
+        const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
+        cb(null, unique + path.extname(file.originalname));
+    }
+});
+const upload = multer({
+    storage,
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) cb(null, true);
+        else cb(new Error('Only image files are allowed'));
+    }
+});
 
 app.use(express.json());
 app.use(cors());
+app.use('/uploads', express.static(uploadsDir));
 
 mongoose.connect(process.env.MONGO_URI, {
     useNewUrlParser: true,
@@ -664,7 +687,6 @@ app.get('/api/chapters/single/:chapterId/available', async (req, res) => {
     }
 });
 
-// Admin Management Routes
 app.post('/api/manga', authMiddleware, adminMiddleware, async (req, res) => {
     try {
         const manga = new Manga(req.body);
@@ -703,6 +725,19 @@ app.put('/api/chapters/:chapterId', authMiddleware, adminMiddleware, async (req,
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
+});
+
+app.post('/api/upload/single', authMiddleware, adminMiddleware, upload.single('image'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const url = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    res.json({ url });
+});
+
+app.post('/api/upload/multiple', authMiddleware, adminMiddleware, upload.array('images', 200), (req, res) => {
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
+    const urls = req.files.map(f => `${req.protocol}://${f.destination.replace(__dirname, '').replace(/\\/g, '/')}/uploads/${f.filename}`.replace('//', '/'));
+    const fileUrls = req.files.map(f => `${req.protocol}://${req.get('host')}/uploads/${f.filename}`);
+    res.json({ urls: fileUrls });
 });
 
 const PORT = process.env.PORT || 9999;
