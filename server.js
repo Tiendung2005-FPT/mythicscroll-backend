@@ -189,14 +189,21 @@ app.get('/api/manga', async (req, res) => {
             filter.title = { $regex: keyword, $options: "i" }
         }
 
-        if (includedGenres.length > 0) {
-            filter.genres = { $all: includedGenres }
+        const toObjectId = (id) => {
+            try { return new mongoose.Types.ObjectId(id); } catch(e) { return null; }
+        };
+
+        const includedObjectIds = includedGenres.map(toObjectId).filter(id => id);
+        const excludedObjectIds = excludedGenres.map(toObjectId).filter(id => id);
+
+        if (includedObjectIds.length > 0) {
+            filter.genres = { $all: includedObjectIds }
         }
 
-        if (excludedGenres.length > 0) {
+        if (excludedObjectIds.length > 0) {
             filter.genres = {
                 ...(filter.genres || {}),
-                $nin: excludedGenres
+                $nin: excludedObjectIds
             }
         }
 
@@ -204,19 +211,48 @@ app.get('/api/manga', async (req, res) => {
             filter.status = { $eq: status }
         }
 
+        const pipeline = [
+            { $match: filter },
+            {
+                $lookup: {
+                    from: "ratings",
+                    localField: "_id",
+                    foreignField: "mangaId",
+                    as: "ratingsInfo"
+                }
+            },
+            {
+                $addFields: {
+                    ratingCount: { $size: "$ratingsInfo" },
+                    averageRating: { $ifNull: [{ $avg: "$ratingsInfo.rating" }, 0] }
+                }
+            },
+            {
+                $project: {
+                    ratingsInfo: 0
+                }
+            }
+        ];
+
         if (sort.length > 0) {
             const direction = sort.startsWith("-") ? -1 : 1;
             const field = sort.startsWith("-") ? sort.slice(1) : sort;
 
-            sortBy[field] = direction;
+            if (field === 'rating') {
+                pipeline.push({ $sort: { averageRating: direction, ratingCount: direction } });
+            } else {
+                pipeline.push({ $sort: { [field]: direction } });
+            }
+        } else {
+            pipeline.push({ $sort: { uploadedAt: -1 } });
         }
 
-        const manga = await Manga.find(filter).sort(sortBy);
+        const manga = await Manga.aggregate(pipeline);
         res.status(200).json(manga)
     } catch (err) {
         res.status(500).json({ error: err.message })
     }
-})
+});
 
 app.get('/api/manga/:mangaId', async (req, res) => {
     try {
@@ -234,6 +270,122 @@ app.get('/api/manga/:mangaId', async (req, res) => {
     }
 })
 
+const JWT_SECRET = process.env.JWT_SECRET || 'mythicscroll_super_secret';
+
+app.post('/api/auth/register', async (req, res) => {
+    try {
+        const { username, email, password } = req.body;
+        if (!username || !email || !password) {
+            return res.status(400).json({ error: "Please provide username, email and password" });
+        }
+        
+        const existingUser = await User.findOne({ $or: [{ email }, { username }] });
+        if (existingUser) {
+            return res.status(400).json({ error: "User already exists with that email or username" });
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        const newUser = new User({
+            username,
+            email,
+            password: hashedPassword
+        });
+
+        await newUser.save();
+
+        const payload = { userId: newUser._id };
+        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+
+        res.status(201).json({ token, user: { id: newUser._id, username: newUser.username, email: newUser.email } });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        if (!email || !password) {
+            return res.status(400).json({ error: "Please provide email and password" });
+        }
+
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(400).json({ error: "Invalid credentials" });
+        }
+
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ error: "Invalid credentials" });
+        }
+
+        const payload = { userId: user._id };
+        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+
+        res.status(200).json({ token, user: { id: user._id, username: user.username, email: user.email } });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+const authMiddleware = (req, res, next) => {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    if (!token) {
+        return res.status(401).json({ error: "No token, authorization denied" });
+    }
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = decoded;
+        next();
+    } catch (err) {
+        res.status(401).json({ error: "Token is not valid" });
+    }
+};
+
+app.get('/api/users/profile', authMiddleware, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.userId).select('-password').populate('role');
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        res.status(200).json(user);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/genres', async (req, res) => {
+    try {
+        const genres = await Genre.find();
+        res.status(200).json(genres);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/chapters/:mangaId', async (req, res) => {
+    try {
+        const chapters = await Chapter.find({ mangaId: req.params.mangaId }).sort({ chapterNumber: -1 });
+        res.status(200).json(chapters);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/chapters/single/:chapterId', async (req, res) => {
+    try {
+        const chapter = await Chapter.findById(req.params.chapterId);
+        if (!chapter) {
+            return res.status(404).json({ error: "Chapter not found" });
+        }
+        res.status(200).json(chapter);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 const PORT = process.env.PORT || 9999;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
