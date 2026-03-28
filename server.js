@@ -724,7 +724,7 @@ app.delete('/api/genres/:id', authMiddleware, adminMiddleware, async (req, res) 
 
 app.get('/api/chapters/:mangaId', async (req, res) => {
     try {
-        const chapters = await Chapter.find({ mangaId: req.params.mangaId }).select('-pages').sort({ chapterNumber: -1 });
+        const chapters = await Chapter.find({ mangaId: req.params.mangaId }).sort({ chapterNumber: -1 });
         res.status(200).json(chapters);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -733,7 +733,7 @@ app.get('/api/chapters/:mangaId', async (req, res) => {
 
 app.get('/api/chapters/:mangaId/available', async (req, res) => {
     try {
-        const chapters = await Chapter.find({ mangaId: req.params.mangaId, isDisplayed: true }).select('-pages').sort({ chapterNumber: -1 });
+        const chapters = await Chapter.find({ mangaId: req.params.mangaId, isDisplayed: true }).sort({ chapterNumber: -1 });
         res.status(200).json(chapters);
     } catch (err) {
         res.status(500).json({ error: err.message });
