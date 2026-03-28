@@ -645,6 +645,37 @@ app.get('/api/genres', async (req, res) => {
     }
 });
 
+app.post('/api/genres', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const genre = new Genre(req.body);
+        await genre.save();
+        res.status(201).json(genre);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.put('/api/genres/:id', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const genre = await Genre.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        if (!genre) return res.status(404).json({ error: "Genre not found" });
+        res.status(200).json(genre);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/genres/:id', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const genre = await Genre.findByIdAndDelete(req.params.id);
+        if (!genre) return res.status(404).json({ error: "Genre not found" });
+        res.status(200).json({ message: "Genre deleted" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+
 app.get('/api/chapters/:mangaId', async (req, res) => {
     try {
         const chapters = await Chapter.find({ mangaId: req.params.mangaId }).sort({ chapterNumber: -1 });
