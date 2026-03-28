@@ -6,32 +6,34 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs')
 const cors = require("cors");
 const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const path = require('path');
 const fs = require('fs');
 const MONGO_URI = process.env.MONGO_URI;
 
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, uploadsDir),
-    filename: (req, file, cb) => {
-        const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-        cb(null, unique + path.extname(file.originalname));
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'mythicscroll',
+        allowed_formats: ['jpg', 'png', 'jpeg'],
     }
 });
+
 const upload = multer({
     storage,
-    limits: { fileSize: 10 * 1024 * 1024 },
-    fileFilter: (req, file, cb) => {
-        if (file.mimetype.startsWith('image/')) cb(null, true);
-        else cb(new Error('Only image files are allowed'));
-    }
+    limits: { fileSize: 10 * 1024 * 1024 }
 });
 
 app.use(express.json());
 app.use(cors());
-app.use('/uploads', express.static(uploadsDir));
+
 
 mongoose.connect(process.env.MONGO_URI, {
     useNewUrlParser: true,
@@ -760,16 +762,15 @@ app.put('/api/chapters/:chapterId', authMiddleware, adminMiddleware, async (req,
 
 app.post('/api/upload/single', authMiddleware, adminMiddleware, upload.single('image'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    const url = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
-    res.json({ url });
+    res.json({ url: req.file.path });
 });
 
 app.post('/api/upload/multiple', authMiddleware, adminMiddleware, upload.array('images', 200), (req, res) => {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
-    const urls = req.files.map(f => `${req.protocol}://${f.destination.replace(__dirname, '').replace(/\\/g, '/')}/uploads/${f.filename}`.replace('//', '/'));
-    const fileUrls = req.files.map(f => `${req.protocol}://${req.get('host')}/uploads/${f.filename}`);
-    res.json({ urls: fileUrls });
+    const urls = req.files.map(f => f.path);
+    res.json({ urls: urls });
 });
+
 
 const PORT = process.env.PORT || 9999;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
