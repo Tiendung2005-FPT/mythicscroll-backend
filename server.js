@@ -6,31 +6,33 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs')
 const cors = require("cors");
 const multer = require('multer');
-const cloudinary = require('cloudinary').v2;
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const axios = require('axios');
+const FormData = require('form-data');
 const path = require('path');
 const fs = require('fs');
 const morgan = require('morgan');
 const MONGO_URI = process.env.MONGO_URI;
 
-cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET
-});
-
-const storage = new CloudinaryStorage({
-    cloudinary: cloudinary,
-    params: {
-        folder: 'mythicscroll',
-        allowed_formats: ['jpg', 'png', 'jpeg'],
-    }
-});
-
+// Removed Cloudinary configuration
+const storage = multer.memoryStorage();
 const upload = multer({
     storage,
     limits: { fileSize: 10 * 1024 * 1024 }
 });
+
+const uploadToImgBB = async (fileBuffer) => {
+    try {
+        const formData = new FormData();
+        formData.append('image', fileBuffer.toString('base64'));
+        const response = await axios.post(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, formData, {
+            headers: formData.getHeaders()
+        });
+        return response.data.data.url;
+    } catch (error) {
+        console.error('ImgBB Upload Error:', error.response?.data || error.message);
+        throw new Error('Failed to upload image to ImgBB');
+    }
+};
 
 app.use(express.json());
 app.use(cors());
@@ -762,15 +764,28 @@ app.put('/api/chapters/:chapterId', authMiddleware, adminMiddleware, async (req,
     }
 });
 
-app.post('/api/upload/single', authMiddleware, adminMiddleware, upload.single('image'), (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    res.json({ url: req.file.path });
+app.post('/api/upload/single', authMiddleware, adminMiddleware, upload.single('image'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+        const url = await uploadToImgBB(req.file.buffer);
+        res.json({ url: url });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.post('/api/upload/multiple', authMiddleware, adminMiddleware, upload.array('images', 200), (req, res) => {
-    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
-    const urls = req.files.map(f => f.path);
-    res.json({ urls: urls });
+app.post('/api/upload/multiple', authMiddleware, adminMiddleware, upload.array('images', 200), async (req, res) => {
+    try {
+        if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
+        
+        // Upload each file to ImgBB
+        const uploadPromises = req.files.map(file => uploadToImgBB(file.buffer));
+        const urls = await Promise.all(uploadPromises);
+        
+        res.json({ urls: urls });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 
