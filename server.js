@@ -211,7 +211,7 @@ const adminMiddleware = async (req, res, next) => {
 
 app.get('/', async (req, res) => {
     try {
-        res.send({ message: 'Welcome to Practical Exam!' });
+        res.send({ message: 'Mythic Scroll backend' });
     } catch (error) {
         res.send({ error: error.message });
     }
