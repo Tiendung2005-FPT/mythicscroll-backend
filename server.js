@@ -192,6 +192,14 @@ const UserSchema = mongoose.Schema({
         ref: "Role",
         required: true,
         default: new mongoose.Types.ObjectId("69bf749e38aa2f4410809e51")
+    },
+    isSubscribed: {
+        type: Boolean,
+        default: false
+    },
+    readHistory: {
+        date: { type: String, default: "" },
+        count: { type: Number, default: 0 }
     }
 })
 
@@ -657,6 +665,23 @@ app.get('/api/users/profile', authMiddleware, async (req, res) => {
     }
 });
 
+app.post('/api/users/subscribe', authMiddleware, async (req, res) => {
+    try {
+        const user = await User.findByIdAndUpdate(
+            req.user.userId,
+            { isSubscribed: true },
+            { new: true }
+        ).select('-password').populate('role');
+        
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        res.status(200).json(user);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.get('/api/genres', async (req, res) => {
     try {
         const genres = await Genre.find();
@@ -699,7 +724,7 @@ app.delete('/api/genres/:id', authMiddleware, adminMiddleware, async (req, res) 
 
 app.get('/api/chapters/:mangaId', async (req, res) => {
     try {
-        const chapters = await Chapter.find({ mangaId: req.params.mangaId }).sort({ chapterNumber: -1 });
+        const chapters = await Chapter.find({ mangaId: req.params.mangaId }).select('-pages').sort({ chapterNumber: -1 });
         res.status(200).json(chapters);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -708,14 +733,14 @@ app.get('/api/chapters/:mangaId', async (req, res) => {
 
 app.get('/api/chapters/:mangaId/available', async (req, res) => {
     try {
-        const chapters = await Chapter.find({ mangaId: req.params.mangaId, isDisplayed: true }).sort({ chapterNumber: -1 });
+        const chapters = await Chapter.find({ mangaId: req.params.mangaId, isDisplayed: true }).select('-pages').sort({ chapterNumber: -1 });
         res.status(200).json(chapters);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-app.get('/api/chapters/single/:chapterId', async (req, res) => {
+app.get('/api/chapters/single/:chapterId', authMiddleware, adminMiddleware, async (req, res) => {
     try {
         const chapter = await Chapter.findById(req.params.chapterId);
         if (!chapter) {
@@ -729,10 +754,62 @@ app.get('/api/chapters/single/:chapterId', async (req, res) => {
 
 app.get('/api/chapters/single/:chapterId/available', async (req, res) => {
     try {
-        const chapter = await Chapter.findOne({ _id: req.params.chapterId, isDisplayed: true });
+        const chapter = await Chapter.findOne({ _id: req.params.chapterId, isDisplayed: true }).lean();
         if (!chapter) {
             return res.status(404).json({ error: "Chapter not found or hidden" });
         }
+
+        // Parse token if provided
+        const token = req.header('Authorization')?.replace('Bearer ', '');
+        let userDoc = null;
+        let isAdmin = false;
+
+        if (token) {
+            try {
+                const decoded = jwt.verify(token, JWT_SECRET);
+                userDoc = await User.findById(decoded.userId).populate('role');
+                if (userDoc?.role?.title === 'Admin') {
+                    isAdmin = true;
+                }
+            } catch (e) {
+                // Invalid token, treat as guest
+            }
+        }
+
+        if (isAdmin) {
+             return res.status(200).json(chapter);
+        }
+
+        if (!userDoc) {
+             const limitedChapter = { ...chapter };
+             delete limitedChapter.pages;
+             limitedChapter.isLimitReached = true;
+             return res.status(200).json(limitedChapter);
+        }
+
+        if (userDoc.isSubscribed) {
+             return res.status(200).json(chapter);
+        }
+
+        const today = new Date().toISOString().split('T')[0];
+        let { date, count } = userDoc.readHistory || { date: "", count: 0 };
+
+        if (date !== today) {
+             date = today;
+             count = 1;
+        } else {
+             if (count >= 5) { // 5 CHAPTER LIMIT
+                 const limitedChapter = { ...chapter };
+                 delete limitedChapter.pages;
+                 limitedChapter.isLimitReached = true;
+                 return res.status(200).json(limitedChapter);
+             }
+             count += 1;
+        }
+
+        userDoc.readHistory = { date, count };
+        await userDoc.save();
+
         res.status(200).json(chapter);
     } catch (err) {
         res.status(500).json({ error: err.message });
