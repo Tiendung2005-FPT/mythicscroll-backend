@@ -10,6 +10,7 @@ const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const path = require('path');
 const fs = require('fs');
+const morgan = require('morgan');
 const MONGO_URI = process.env.MONGO_URI;
 
 cloudinary.config({
@@ -33,6 +34,7 @@ const upload = multer({
 
 app.use(express.json());
 app.use(cors());
+app.use(morgan('dev'));
 
 
 mongoose.connect(process.env.MONGO_URI, {
@@ -771,6 +773,11 @@ app.post('/api/upload/multiple', authMiddleware, adminMiddleware, upload.array('
     res.json({ urls: urls });
 });
 
+
+app.use((err, req, res, next) => {
+    console.error('SERVER ERROR:', err);
+    res.status(500).json({ error: err.message || 'Something went wrong on the server' });
+});
 
 const PORT = process.env.PORT || 9999;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
