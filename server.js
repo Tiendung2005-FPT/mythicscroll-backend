@@ -22,17 +22,32 @@ const upload = multer({
 
 const uploadToImgBB = async (fileBuffer) => {
     try {
+        const apiKey = process.env.IMGBB_API_KEY?.trim(); // Trim to avoid invisible character errors
+        if (!apiKey) throw new Error('IMGBB_API_KEY is missing in .env');
+
         const formData = new FormData();
-        formData.append('image', fileBuffer.toString('base64'));
-        const response = await axios.post(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, formData, {
-            headers: formData.getHeaders()
+        // Use the buffer directly instead of base64 for better reliability
+        formData.append('image', fileBuffer, { filename: 'image.png' });
+        
+        const response = await axios.post(`https://api.imgbb.com/1/upload?key=${apiKey}`, formData, {
+            headers: {
+                ...formData.getHeaders(),
+            },
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity
         });
-        return response.data.data.url;
+        
+        if (response.data && response.data.data && response.data.data.url) {
+            return response.data.data.url;
+        } else {
+            throw new Error('Invalid response from ImgBB');
+        }
     } catch (error) {
         console.error('ImgBB Upload Error:', error.response?.data || error.message);
-        throw new Error('Failed to upload image to ImgBB');
+        throw new Error(`Failed to upload to ImgBB: ${error.response?.data?.error?.message || error.message}`);
     }
 };
+
 
 app.use(express.json());
 app.use(cors());
